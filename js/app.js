@@ -84,6 +84,11 @@ document.getElementById("tabs").addEventListener("click", (e) => {
 
 function render() {
   const root = document.getElementById("view-root");
+  if (STATE.view === "settings") {
+    root.innerHTML = renderSettings();
+    bindSettings();
+    return;
+  }
   if (!STATE.signedIn) {
     root.innerHTML = renderConnectPrompt();
     bindConnectPrompt();
