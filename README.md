@@ -39,9 +39,13 @@ This lets the app ask *your* permission to create/read its own files in
 4. In the left menu: **APIs & Services → Credentials** → **Create Credentials
    → OAuth client ID**.
    - Application type: **Web application**
-   - Under **Authorized JavaScript origins**, add your exact site URL from
-     Step 1 (e.g. `https://random-name-123.netlify.app` — no trailing slash,
-     no path).
+   - Under **Authorized JavaScript origins**, add your exact site origin
+     (e.g. `https://yourname.github.io` — no trailing slash, no path).
+   - Under **Authorized redirect URIs**, add the *exact* URL of the app page
+     itself (e.g. `https://yourname.github.io/emdr-companion/index.html` or
+     whatever your address bar shows when the app loads). The app's Settings
+     tab also displays this exact value once you've saved a Client ID, so you
+     can copy it from there if you're unsure.
 5. Copy the generated **Client ID** (looks like `xxxxx.apps.googleusercontent.com`).
 
 ## Step 3 — Connect the app

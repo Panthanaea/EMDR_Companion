@@ -45,6 +45,10 @@ const DRIVE = (() => {
     });
   }
 
+  function getRedirectUri() {
+    return window.location.origin + window.location.pathname;
+  }
+
   async function ensureTokenClient() {
     await loadGis();
     const id = getClientId();
@@ -53,7 +57,9 @@ const DRIVE = (() => {
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: id,
         scope: SCOPE,
-        callback: () => {}, // overridden per-call below
+        ux_mode: "redirect",
+        redirect_uri: getRedirectUri(),
+        callback: () => {}, // unused in redirect mode — response comes back via URL fragment
       });
     }
     return tokenClient;
@@ -63,18 +69,36 @@ const DRIVE = (() => {
     return !!accessToken && Date.now() < tokenExpiresAt;
   }
 
-  async function signIn({ silentFirst = true } = {}) {
+  // Call this once, early, on every page load. If the page was just reached
+  // via the OAuth redirect, Google appends the token to the URL fragment;
+  // this reads it, saves it, and cleans the URL so it isn't reprocessed.
+  function checkRedirectResult() {
+    const hash = window.location.hash;
+    if (!hash || hash.indexOf("access_token") === -1) return false;
+    const params = new URLSearchParams(hash.replace(/^#/, ""));
+    const token = params.get("access_token");
+    const expiresIn = Number(params.get("expires_in") || 0);
+    const error = params.get("error");
+    history.replaceState(null, "", window.location.pathname + window.location.search);
+    if (error) {
+      console.error("OAuth error:", error);
+      return false;
+    }
+    if (token) {
+      accessToken = token;
+      tokenExpiresAt = Date.now() + (expiresIn - 60) * 1000;
+      persistToken();
+      return true;
+    }
+    return false;
+  }
+
+  // Triggers a full-page redirect to Google's consent screen. This function
+  // does not "return" in the usual sense — the page navigates away, and the
+  // result is picked up by checkRedirectResult() on the next page load.
+  async function signIn() {
     const client = await ensureTokenClient();
-    return new Promise((resolve, reject) => {
-      client.callback = (resp) => {
-        if (resp.error) return reject(new Error(resp.error));
-        accessToken = resp.access_token;
-        tokenExpiresAt = Date.now() + (resp.expires_in - 60) * 1000;
-        persistToken();
-        resolve(accessToken);
-      };
-      client.requestAccessToken({ prompt: silentFirst ? "" : "consent" });
-    });
+    client.requestAccessToken();
   }
 
   function signOut() {
@@ -85,7 +109,7 @@ const DRIVE = (() => {
 
   async function ensureToken() {
     if (isSignedIn()) return accessToken;
-    return signIn({ silentFirst: false });
+    throw new Error("NOT_SIGNED_IN");
   }
 
   function authHeaders(extra = {}) {
@@ -221,6 +245,8 @@ const DRIVE = (() => {
   return {
     setClientId,
     getClientId,
+    getRedirectUri,
+    checkRedirectResult,
     isSignedIn,
     signIn,
     signOut,

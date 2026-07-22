@@ -122,15 +122,11 @@ function renderConnectPrompt() {
 function bindConnectPrompt() {
   const signBtn = document.getElementById("btn-signin");
   if (signBtn) signBtn.addEventListener("click", async () => {
-    signBtn.textContent = "Connecting…";
+    signBtn.textContent = "Redirecting to Google…";
     try {
-      await DRIVE.signIn({ silentFirst: false });
-      STATE.data = await DRIVE.loadData();
-      STATE.signedIn = true;
-      maybeShowWeeklyBanner();
-      setView("home");
+      await DRIVE.signIn(); // navigates away; nothing after this runs
     } catch (e) {
-      alert(e.message || "Could not connect to Google Drive.");
+      alert(e.message || "Could not start sign-in.");
       signBtn.textContent = "Connect Google Drive";
     }
   });
@@ -618,7 +614,11 @@ function renderSettings() {
       <h3 style="font-size:14px;">Google Drive connection</h3>
       <p class="small">One-time setup: create a free OAuth Client ID at
         <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">console.cloud.google.com</a>
-        (OAuth client type: "Web application", add this page's URL under Authorized JavaScript origins), then paste the Client ID below.</p>
+        (OAuth client type: "Web application"). Add this exact address under <strong>both</strong>
+        "Authorized JavaScript origins" (just the origin) <strong>and</strong> "Authorized redirect URIs" (the full address below), then paste the Client ID here.</p>
+      <div class="card tight" style="background:#F2EDE4;">
+        <div class="small" style="word-break:break-all;"><strong>Authorized redirect URI to add:</strong><br/>${escapeHtml(DRIVE.getRedirectUri())}</div>
+      </div>
       <label>Google OAuth Client ID</label>
       <input type="text" id="client-id-input" value="${escapeHtml(DRIVE.getClientId() || "")}" placeholder="xxxx.apps.googleusercontent.com" />
       <button class="btn btn-outline mt-8" id="btn-save-client-id">Save Client ID</button>
@@ -659,15 +659,11 @@ function bindSettings() {
   });
   const connectBtn = document.getElementById("btn-connect-now");
   if (connectBtn) connectBtn.addEventListener("click", async () => {
-    connectBtn.textContent = "Connecting…";
+    connectBtn.textContent = "Redirecting to Google…";
     try {
-      await DRIVE.signIn({ silentFirst: false });
-      STATE.data = await DRIVE.loadData();
-      STATE.signedIn = true;
-      maybeShowWeeklyBanner();
-      render();
+      await DRIVE.signIn(); // navigates away; nothing after this runs
     } catch (e) {
-      alert(e.message || "Could not connect.");
+      alert(e.message || "Could not start sign-in.");
       connectBtn.textContent = "Connect Google Drive";
     }
   });
@@ -725,16 +721,15 @@ async function boot() {
     Notification.requestPermission().catch(() => {});
   }
 
-  const clientId = DRIVE.getClientId();
-  if (clientId) {
+  DRIVE.checkRedirectResult(); // picks up the token if we just came back from Google
+
+  if (DRIVE.isSignedIn()) {
     try {
-      if (!DRIVE.isSignedIn()) {
-        await DRIVE.signIn({ silentFirst: true });
-      }
       STATE.data = await DRIVE.loadData();
       STATE.signedIn = true;
       maybeShowWeeklyBanner();
-    } catch {
+    } catch (e) {
+      console.error(e);
       STATE.signedIn = false;
     }
   }
