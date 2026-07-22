@@ -10,7 +10,6 @@ const DRIVE = (() => {
   const SCOPE = "https://www.googleapis.com/auth/drive.file";
 
   let clientId = null;
-  let tokenClient = null;
   let accessToken = localStorage.getItem("emdr_access_token") || null;
   let tokenExpiresAt = Number(localStorage.getItem("emdr_token_expires_at") || 0);
   let dataFileId = null;
@@ -34,71 +33,57 @@ const DRIVE = (() => {
     return clientId || localStorage.getItem("emdr_client_id");
   }
 
-  function loadGis() {
-    return new Promise((resolve, reject) => {
-      if (window.google && window.google.accounts) return resolve();
-      const s = document.createElement("script");
-      s.src = "https://accounts.google.com/gsi/client";
-      s.onload = resolve;
-      s.onerror = () => reject(new Error("Could not load Google sign-in script."));
-      document.head.appendChild(s);
-    });
-  }
-
-  function getRedirectUri() {
-    return window.location.origin + window.location.pathname;
-  }
-
-  async function ensureTokenClient() {
-    await loadGis();
-    const id = getClientId();
-    if (!id) throw new Error("NO_CLIENT_ID");
-    if (!tokenClient) {
-      tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: id,
-        scope: SCOPE,
-        ux_mode: "redirect",
-        redirect_uri: getRedirectUri(),
-        callback: () => {}, // unused in redirect mode — response comes back via URL fragment
-      });
-    }
-    return tokenClient;
+  function redirectUri() {
+    // The exact page URL (no hash/query) — this must be registered under
+    // "Authorized redirect URIs" for the OAuth client, exactly as shown.
+    return location.origin + location.pathname;
   }
 
   function isSignedIn() {
     return !!accessToken && Date.now() < tokenExpiresAt;
   }
 
-  // Call this once, early, on every page load. If the page was just reached
-  // via the OAuth redirect, Google appends the token to the URL fragment;
-  // this reads it, saves it, and cleans the URL so it isn't reprocessed.
+  // Call once on every page load. If the page just came back from Google's
+  // redirect, the token is sitting in the URL fragment — pull it out, save
+  // it, and scrub the URL. We build the auth request ourselves (rather than
+  // using Google's newer JS helper) because that helper's redirect mode
+  // defaults to POSTing the token to the redirect page, which a static site
+  // with no server can't read. Requesting response_type=token directly from
+  // Google's classic endpoint returns the token in the URL fragment instead,
+  // which plain client-side JS can read.
   function checkRedirectResult() {
-    const hash = window.location.hash;
-    if (!hash || hash.indexOf("access_token") === -1) return false;
-    const params = new URLSearchParams(hash.replace(/^#/, ""));
+    if (!location.hash || !location.hash.includes("access_token")) return false;
+    const params = new URLSearchParams(location.hash.slice(1));
     const token = params.get("access_token");
-    const expiresIn = Number(params.get("expires_in") || 0);
+    const expiresIn = params.get("expires_in");
     const error = params.get("error");
-    history.replaceState(null, "", window.location.pathname + window.location.search);
+    history.replaceState(null, "", location.pathname + location.search);
     if (error) {
       console.error("OAuth error:", error);
       return false;
     }
-    if (token) {
-      accessToken = token;
-      tokenExpiresAt = Date.now() + (expiresIn - 60) * 1000;
-      persistToken();
-      return true;
-    }
-    return false;
+    if (!token) return false;
+    accessToken = token;
+    tokenExpiresAt = Date.now() + (Number(expiresIn || 3600) - 60) * 1000;
+    persistToken();
+    return true;
   }
 
-  // Triggers a full-page redirect to Google's consent screen. This function
-  // does not "return" in the usual sense — the page navigates away, and the
-  // result is picked up by checkRedirectResult() on the next page load.
+  // Triggers a full-page redirect to Google. Nothing after this call runs in
+  // this page life — the browser navigates away and the app reloads fresh
+  // once Google sends it back to redirectUri() with the token in the hash.
   async function signIn() {
-    const client = await ensureTokenClient();
-    client.requestAccessToken();
+    const id = getClientId();
+    if (!id) throw new Error("NO_CLIENT_ID");
+    const params = new URLSearchParams({
+      client_id: id,
+      redirect_uri: redirectUri(),
+      response_type: "token",
+      scope: SCOPE,
+      include_granted_scopes: "true",
+      prompt: "consent",
+    });
+    location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
   }
 
   function signOut() {
@@ -245,7 +230,7 @@ const DRIVE = (() => {
   return {
     setClientId,
     getClientId,
-    getRedirectUri,
+    getRedirectUri: redirectUri,
     checkRedirectResult,
     isSignedIn,
     signIn,
