@@ -199,6 +199,34 @@ input[type=color] {
 .skill-result { text-align: center; }
 .skill-result .skill-name { font-size: 22px; margin: 10px 0 4px 0; }
 
+/* Settings sub-tabs (reuses .chip styling via #settings-tabs .chip) */
+
+/* Safe Place image thumbnail picker */
+.thumb-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.thumb {
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-sm);
+  border: 3px solid transparent;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--mist);
+}
+.thumb.selected { border-color: var(--amber); }
+.thumb-fill {
+  width: 100%;
+  height: 100%;
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.thumb-loading { font-size: 22px; opacity: 0.6; }
+
 /* Safe place immersive mode */
 .safeplace-stage {
   position: fixed;
@@ -207,17 +235,69 @@ input[type=color] {
   background-position: center;
   background-color: var(--moss-dark);
   z-index: 50;
+  color: #fff;
+}
+.safeplace-close {
+  position: absolute; top: 20px; right: 20px; z-index: 2;
+  background: rgba(255,255,255,0.18); border: none; color: #fff;
+  width: 36px; height: 36px; border-radius: 50%; font-size: 16px;
+}
+.safeplace-play-hint { position: absolute; top: 20px; left: 20px; z-index: 2; width: auto; }
+
+/* Instructions panel: sits in the bottom quarter by default, expands upward
+   over the image with a flat 25%-opacity black background when "More…" is tapped. */
+.safeplace-instructions {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 25vh;
+  overflow: hidden;
+  transition: height 0.25s ease;
+}
+.safeplace-instructions.expanded {
+  height: 88vh;
+}
+.safeplace-instructions-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.6), rgba(0,0,0,0));
+  pointer-events: none;
+}
+.safeplace-instructions.expanded .safeplace-instructions-scrim {
+  background: rgba(0,0,0,0.25);
+}
+.safeplace-instructions-inner {
+  position: relative;
+  height: 100%;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
+  padding: 16px 20px calc(16px + env(safe-area-inset-bottom, 0px)) 20px;
+}
+.safeplace-instructions.expanded .safeplace-instructions-inner {
+  justify-content: flex-start;
+  padding-top: calc(20px + env(safe-area-inset-top, 0px));
+}
+.safeplace-instructions-text {
+  font-size: 15px;
+  line-height: 1.5;
+  overflow: hidden;
+  max-height: 100%;
+}
+.safeplace-instructions.expanded .safeplace-instructions-text {
+  overflow-y: auto;
+}
+.safeplace-more {
+  align-self: flex-start;
+  margin-top: 10px;
+  background: rgba(255,255,255,0.22);
+  border: none;
   color: #fff;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  width: auto;
 }
-.safeplace-stage .scrim {
-  position: absolute; inset: 0;
-  background: linear-gradient(to bottom, rgba(0,0,0,0.05), rgba(20,30,20,0.55));
-}
-.safeplace-controls { position: relative; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
-.safeplace-close { position: absolute; top: 20px; right: 20px; background: rgba(255,255,255,0.18); border: none; color: #fff; width: 36px; height: 36px; border-radius: 50%; font-size: 16px; }
 
 /* Weekly summary */
 .summary-stat { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--mist); font-size: 14px; }

@@ -3,10 +3,13 @@ const STATE = {
   data: null,
   signedIn: false,
   view: "home",
+  settingsTab: "app", // app | skills | container | safeplace
   showNoteForm: false,
+  noteTopicMode: "select", // select | other — which UI the topic field is showing
   picker: null, // { nodeKey } while the "help me choose" flow is active
   pickerResult: null, // skill key once the tree reaches a leaf
   syncStatus: "idle", // idle | saving | saved | error
+  thumbCache: {}, // Drive fileId -> blob URL, for Safe Place image thumbnails
 };
 
 const SYMPTOM_OPTIONS = [
@@ -128,9 +131,14 @@ function setView(view) {
   document.querySelectorAll("nav.tabs button").forEach((b) => {
     b.classList.toggle("active", b.dataset.view === view);
   });
-  const titles = { home: "Container", ground: "Ground Me", safeplace: "Safe Place", summary: "Weekly Summary", settings: "Settings" };
-  document.getElementById("page-title").textContent = titles[view];
   render();
+}
+
+function updatePageTitle() {
+  const containerName = (STATE.data && STATE.data.containerName) || "Container";
+  const titles = { home: containerName, ground: "Ground Me", safeplace: "Safe Place", summary: "Weekly Summary", settings: "Settings" };
+  const el = document.getElementById("page-title");
+  if (el) el.textContent = titles[STATE.view];
 }
 
 document.getElementById("tabs").addEventListener("click", (e) => {
@@ -141,6 +149,7 @@ document.getElementById("tabs").addEventListener("click", (e) => {
 function render() {
   applyAppearance();
   updateNavBar();
+  updatePageTitle();
   const root = document.getElementById("view-root");
   if (STATE.view === "settings") {
     root.innerHTML = renderSettings();
@@ -211,25 +220,12 @@ function renderHome() {
     .slice(0, 3);
 
   return `
-    <div class="card">
-      <label>Container name</label>
-      <input type="text" id="home-container-name" value="${escapeHtml(data.containerName)}" />
-      <button class="btn btn-outline mt-8" id="home-save-name">Save name</button>
-
-      <label class="mt-16">Icon shown in the bottom menu</label>
-      <div class="chip-row" id="home-icon-picker">
-        ${Object.entries(CONTAINER_ICON_OPTIONS).map(([key, opt]) => `
-          <span class="chip ${key === (data.containerIcon || "jar") ? "selected" : ""}" data-icon-key="${key}">${opt.emoji} ${escapeHtml(opt.label)}</span>
-        `).join("")}
-      </div>
-    </div>
-
     <div class="jar-wrap">
       ${jarSvg(fillLevel)}
       <div class="jar-caption">${escapeHtml(data.containerName)}</div>
     </div>
 
-    <button class="btn btn-amber" id="btn-add-note">+ Add to my container</button>
+    <button class="btn btn-amber" id="btn-add-note">+ Add to my ${escapeHtml(data.containerName)}</button>
 
     ${STATE.showNoteForm ? renderNoteForm() : ""}
 
@@ -247,7 +243,7 @@ function renderHome() {
 
     <div class="card">
       <h3 style="font-size:14px;">Recent entries</h3>
-      ${notes.length === 0 ? `<div class="empty-state"><div class="icon">🏺</div>Nothing set aside yet. When something's weighing on you, add it here.</div>` :
+      ${notes.length === 0 ? `<div class="empty-state"><div class="icon">${(CONTAINER_ICON_OPTIONS[data.containerIcon || "jar"] || CONTAINER_ICON_OPTIONS.jar).emoji}</div>Nothing set aside yet. When something's weighing on you, add it to your ${escapeHtml(data.containerName)}.</div>` :
         notes.slice(0, 15).map(noteItemHtml).join("")}
     </div>
   `;
@@ -299,13 +295,23 @@ function sudDotsHtml(value, readonly, inputId) {
 }
 
 function renderNoteForm() {
-  const knownTopics = [...new Set(STATE.data.notes.map((n) => n.topic).filter(Boolean))];
+  const data = STATE.data;
+  const knownTopics = data.knownTopics || [];
+  const mode = STATE.noteTopicMode || "select";
   return `
     <div class="card" id="note-form">
-      <h3 style="font-size:15px;">Set something in the container</h3>
+      <h3 style="font-size:15px;">Set something in your ${escapeHtml(data.containerName)}</h3>
       <label>Topic / trauma this relates to</label>
-      <input type="text" id="nf-topic" list="topic-list" placeholder="e.g. Car accident, Dad's voice…" />
-      <datalist id="topic-list">${knownTopics.map((t) => `<option value="${escapeHtml(t)}">`).join("")}</datalist>
+      ${knownTopics.length === 0 ? `
+        <input type="text" id="nf-topic-other" placeholder="e.g. Car accident, Dad's voice…" />
+        <p class="small mt-8">Add topics in Settings → ${escapeHtml(data.containerName)} to pick from a list next time.</p>
+      ` : `
+        <select id="nf-topic-select" style="display:${mode === "select" ? "block" : "none"};">
+          ${knownTopics.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}
+          <option value="__other__">Other…</option>
+        </select>
+        <input type="text" id="nf-topic-other" placeholder="Type the topic" style="display:${mode === "other" ? "block" : "none"}; margin-top:${mode === "other" ? "8px" : "0"};" />
+      `}
 
       <label>How distressing is it right now? (SUD 0–10)</label>
       <div class="sud-gauge" id="nf-sud-gauge">${sudDotsHtml(0, false)}</div>
@@ -320,29 +326,16 @@ function renderNoteForm() {
 
       <div style="display:flex; gap:8px; margin-top:16px;">
         <button class="btn btn-outline" id="nf-cancel">Cancel</button>
-        <button class="btn btn-primary" id="nf-save">Save to container</button>
+        <button class="btn btn-primary" id="nf-save">Save to ${escapeHtml(data.containerName)}</button>
       </div>
     </div>
   `;
 }
 
 function bindHome() {
-  document.getElementById("home-save-name").addEventListener("click", () => {
-    STATE.data.containerName = document.getElementById("home-container-name").value.trim() || "My Container";
-    persist();
-    render();
-  });
-
-  document.getElementById("home-icon-picker").addEventListener("click", (e) => {
-    const chip = e.target.closest("[data-icon-key]");
-    if (!chip) return;
-    STATE.data.containerIcon = chip.dataset.iconKey;
-    persist();
-    render();
-  });
-
   document.getElementById("btn-add-note").addEventListener("click", () => {
     STATE.showNoteForm = !STATE.showNoteForm;
+    STATE.noteTopicMode = "select";
     render();
   });
 
@@ -377,14 +370,40 @@ function bindHome() {
     else { selectedSymptoms.add(s); chip.classList.add("selected"); }
   });
 
+  const topicSelect = document.getElementById("nf-topic-select");
+  const topicOther = document.getElementById("nf-topic-other");
+  if (topicSelect && topicOther) {
+    topicSelect.addEventListener("change", () => {
+      if (topicSelect.value === "__other__") {
+        topicOther.style.display = "block";
+        topicOther.style.marginTop = "8px";
+        topicOther.focus();
+        STATE.noteTopicMode = "other";
+      } else {
+        topicOther.style.display = "none";
+        STATE.noteTopicMode = "select";
+      }
+    });
+  }
+
   document.getElementById("nf-cancel").addEventListener("click", () => {
     STATE.showNoteForm = false;
     render();
   });
 
   document.getElementById("nf-save").addEventListener("click", () => {
-    const topic = document.getElementById("nf-topic").value.trim();
+    let topic = "";
+    if (topicSelect && topicSelect.value !== "__other__") {
+      topic = topicSelect.value;
+    } else if (topicOther) {
+      topic = topicOther.value.trim();
+    }
     if (!topic) { alert("Give it a short topic name so you can track it over time."); return; }
+
+    STATE.data.knownTopics = STATE.data.knownTopics || [];
+    const alreadyKnown = STATE.data.knownTopics.some((t) => t.toLowerCase() === topic.toLowerCase());
+    if (!alreadyKnown) STATE.data.knownTopics.push(topic);
+
     STATE.data.notes.push({
       id: uuid(),
       topic,
@@ -431,10 +450,11 @@ function skillCardHtml(key, s) {
 
 function renderPicker() {
   const node = SKILL_PICKER_TREE[STATE.picker.nodeKey];
+  const containerName = STATE.data.containerName;
   return `
     <div class="card question-card">
       <h2>${escapeHtml(node.question)}</h2>
-      ${node.options.map((opt, i) => `<button class="btn btn-outline answer-btn" data-opt="${i}">${escapeHtml(opt.label)}</button>`).join("")}
+      ${node.options.map((opt, i) => `<button class="btn btn-outline answer-btn" data-opt="${i}">${escapeHtml(opt.label.replace("my Container", `my ${containerName}`))}</button>`).join("")}
       <button class="btn-ghost small" id="picker-cancel">Cancel</button>
     </div>
   `;
@@ -442,13 +462,15 @@ function renderPicker() {
 
 function renderPickerResult() {
   const skills = loadSkills(STATE.data);
+  const containerName = STATE.data.containerName;
+  const containerIcon = (CONTAINER_ICON_OPTIONS[STATE.data.containerIcon || "jar"] || CONTAINER_ICON_OPTIONS.jar).emoji;
   if (STATE.pickerResult === "container") {
     return `
       <div class="card skill-result">
-        <div style="font-size:32px;">🏺</div>
-        <div class="skill-name">Use your Container</div>
-        <p class="small">Set the intruding memory or feeling aside in your container for now — you don't have to resolve it this moment.</p>
-        <button class="btn btn-primary" id="goto-container">Go to my Container</button>
+        <div style="font-size:32px;">${containerIcon}</div>
+        <div class="skill-name">Use your ${escapeHtml(containerName)}</div>
+        <p class="small">Set the intruding memory or feeling aside in your ${escapeHtml(containerName)} for now — you don't have to resolve it this moment.</p>
+        <button class="btn btn-primary" id="goto-container">Go to my ${escapeHtml(containerName)}</button>
         <button class="btn-ghost small mt-8" id="picker-restart">Start over</button>
       </div>
     `;
@@ -532,45 +554,39 @@ function bindGround() {
 // --- SAFE PLACE ---------------------------------------------------------------
 function renderSafePlace() {
   const sp = STATE.data.safePlace;
+  const icon = (SAFEPLACE_ICON_OPTIONS[sp.icon || "trees"] || SAFEPLACE_ICON_OPTIONS.trees).emoji;
+  const canEnter = !!(sp.selectedImageId || sp.selectedSoundId);
   return `
     <div class="card center">
-      <div style="font-size:36px;">🌲</div>
+      <div style="font-size:36px;">${icon}</div>
       <h2>${escapeHtml(sp.name)}</h2>
-      <button class="btn btn-primary" id="btn-enter-safeplace" ${(sp.images.length + sp.sounds.length === 0) ? "disabled" : ""}>Enter Safe Place</button>
-      ${(sp.images.length + sp.sounds.length === 0) ? `<p class="small mt-8">Add an image or sound below to build your experience.</p>` : ""}
+      ${sp.description ? `<p class="small">${escapeHtml(sp.description)}</p>` : ""}
+      <button class="btn btn-primary" id="btn-enter-safeplace" ${canEnter ? "" : "disabled"}>Enter ${escapeHtml(sp.name)}</button>
+      ${canEnter ? "" : `<p class="small mt-8">Choose an image and/or sound below. Add more in Settings → Safe Place.</p>`}
     </div>
 
     <div class="card">
-      <label>Name your safe place</label>
-      <input type="text" id="sp-name" value="${escapeHtml(sp.name)}" />
-      <button class="btn btn-outline mt-8" id="sp-save-name">Save name</button>
-      <p class="small mt-8">This name also shows on the bottom menu button in place of "Safe Place".</p>
-
-      <label class="mt-16">Icon shown in the bottom menu</label>
-      <div class="chip-row" id="sp-icon-picker">
-        ${Object.entries(SAFEPLACE_ICON_OPTIONS).map(([key, opt]) => `
-          <span class="chip ${key === (sp.icon || "trees") ? "selected" : ""}" data-icon-key="${key}">${opt.emoji} ${escapeHtml(opt.label)}</span>
-        `).join("")}
-      </div>
+      <h3 style="font-size:14px;">Choose an image</h3>
+      ${sp.images.length === 0
+        ? `<p class="small">No images yet. Add some in Settings → Safe Place.</p>`
+        : `<div class="thumb-grid" id="sp-image-grid">
+            ${sp.images.map((img) => `
+              <div class="thumb ${img.id === sp.selectedImageId ? "selected" : ""}" data-select-image="${img.id}">
+                <div class="thumb-fill" data-thumb-id="${img.id}"><span class="thumb-loading">🖼️</span></div>
+              </div>
+            `).join("")}
+          </div>`
+      }
     </div>
 
     <div class="card">
-      <h3 style="font-size:14px;">Images</h3>
-      <div class="chip-row">
-        ${sp.images.map((img) => `<span class="chip">${escapeHtml(img.name)} <a href="#" data-del-img="${img.id}">✕</a></span>`).join("") || `<span class="small">None yet</span>`}
-      </div>
-      <button class="btn btn-outline mt-8" id="btn-add-image">+ Add image</button>
-      <input type="file" id="file-image" accept="image/*" multiple style="display:none;" />
-    </div>
-
-    <div class="card">
-      <h3 style="font-size:14px;">Sounds</h3>
-      <p class="small">The first sound in this list plays on loop when you enter your Safe Place.</p>
-      <div class="chip-row">
-        ${sp.sounds.map((snd) => `<span class="chip">${escapeHtml(snd.name)} <a href="#" data-del-snd="${snd.id}">✕</a></span>`).join("") || `<span class="small">None yet</span>`}
-      </div>
-      <button class="btn btn-outline mt-8" id="btn-add-sound">+ Add sound</button>
-      <input type="file" id="file-sound" accept="audio/*" multiple style="display:none;" />
+      <h3 style="font-size:14px;">Choose a sound</h3>
+      ${sp.sounds.length === 0
+        ? `<p class="small">No sounds yet. Add some in Settings → Safe Place.</p>`
+        : `<div class="chip-row" id="sp-sound-list">
+            ${sp.sounds.map((snd) => `<span class="chip ${snd.id === sp.selectedSoundId ? "selected" : ""}" data-select-sound="${snd.id}">🔊 ${escapeHtml(snd.name)}</span>`).join("")}
+          </div>`
+      }
     </div>
   `;
 }
@@ -578,75 +594,47 @@ function renderSafePlace() {
 function bindSafePlace() {
   const enterBtn = document.getElementById("btn-enter-safeplace");
   if (enterBtn) enterBtn.addEventListener("click", () => {
-    SAFEPLACE.open(STATE.data.safePlace);
+    const skills = loadSkills(STATE.data);
+    SAFEPLACE.open(STATE.data.safePlace, skills.safeplace ? skills.safeplace.instructions : "");
   });
 
-  document.getElementById("sp-save-name").addEventListener("click", () => {
-    STATE.data.safePlace.name = document.getElementById("sp-name").value.trim() || "Safe Place";
-    persist();
-    render();
-  });
-
-  document.getElementById("sp-icon-picker").addEventListener("click", (e) => {
-    const chip = e.target.closest("[data-icon-key]");
-    if (!chip) return;
-    STATE.data.safePlace.icon = chip.dataset.iconKey;
-    persist();
-    render();
-  });
-
-  const imgBtn = document.getElementById("btn-add-image");
-  const imgInput = document.getElementById("file-image");
-  imgBtn.addEventListener("click", () => imgInput.click());
-  imgInput.addEventListener("change", async () => {
-    for (const file of imgInput.files) {
-      imgBtn.textContent = "Uploading…";
-      try {
-        const uploaded = await DRIVE.uploadMedia(file);
-        STATE.data.safePlace.images.push(uploaded);
-      } catch (e) { alert(e.message); }
-    }
-    imgBtn.textContent = "+ Add image";
-    persist();
-    render();
-  });
-
-  const sndBtn = document.getElementById("btn-add-sound");
-  const sndInput = document.getElementById("file-sound");
-  sndBtn.addEventListener("click", () => sndInput.click());
-  sndInput.addEventListener("change", async () => {
-    for (const file of sndInput.files) {
-      sndBtn.textContent = "Uploading…";
-      try {
-        const uploaded = await DRIVE.uploadMedia(file);
-        STATE.data.safePlace.sounds.push(uploaded);
-      } catch (e) { alert(e.message); }
-    }
-    sndBtn.textContent = "+ Add sound";
-    persist();
-    render();
-  });
-
-  document.querySelectorAll("[data-del-img]").forEach((a) => {
-    a.addEventListener("click", async (e) => {
-      e.preventDefault();
-      const id = a.dataset.delImg;
-      STATE.data.safePlace.images = STATE.data.safePlace.images.filter((i) => i.id !== id);
+  document.querySelectorAll("[data-select-image]").forEach((el) => {
+    el.addEventListener("click", () => {
+      STATE.data.safePlace.selectedImageId = el.dataset.selectImage;
       persist();
       render();
-      DRIVE.deleteMedia(id).catch(() => {});
     });
   });
-  document.querySelectorAll("[data-del-snd]").forEach((a) => {
-    a.addEventListener("click", async (e) => {
-      e.preventDefault();
-      const id = a.dataset.delSnd;
-      STATE.data.safePlace.sounds = STATE.data.safePlace.sounds.filter((i) => i.id !== id);
+
+  document.querySelectorAll("[data-select-sound]").forEach((el) => {
+    el.addEventListener("click", () => {
+      STATE.data.safePlace.selectedSoundId = el.dataset.selectSound;
       persist();
       render();
-      DRIVE.deleteMedia(id).catch(() => {});
     });
   });
+
+  loadSafePlaceThumbnails();
+}
+
+async function loadSafePlaceThumbnails() {
+  const placeholders = document.querySelectorAll("[data-thumb-id]");
+  for (const el of placeholders) {
+    const id = el.dataset.thumbId;
+    if (STATE.thumbCache[id]) {
+      el.style.backgroundImage = `url(${STATE.thumbCache[id]})`;
+      el.innerHTML = "";
+      continue;
+    }
+    try {
+      const url = await DRIVE.streamMedia(id);
+      STATE.thumbCache[id] = url;
+      el.style.backgroundImage = `url(${url})`;
+      el.innerHTML = "";
+    } catch (e) {
+      console.error(e);
+    }
+  }
 }
 
 // --- SUMMARY --------------------------------------------------------------
@@ -707,9 +695,29 @@ function bindSummary() {
 }
 
 // --- SETTINGS ---------------------------------------------------------------
+const SETTINGS_TABS = [
+  { key: "app", label: "App Settings" },
+  { key: "skills", label: "Coping Skills" },
+  { key: "container", label: "Container" },
+  { key: "safeplace", label: "Safe Place" },
+];
+
 function renderSettings() {
+  const tab = STATE.settingsTab || "app";
+  return `
+    <div class="chip-row" id="settings-tabs" style="margin-bottom:14px;">
+      ${SETTINGS_TABS.map((t) => `<span class="chip ${t.key === tab ? "selected" : ""}" data-settings-tab="${t.key}">${t.label}</span>`).join("")}
+    </div>
+    ${tab === "app" ? renderSettingsApp() : ""}
+    ${tab === "skills" ? renderSettingsSkills() : ""}
+    ${tab === "container" ? renderSettingsContainer() : ""}
+    ${tab === "safeplace" ? renderSettingsSafePlace() : ""}
+  `;
+}
+
+function renderSettingsApp() {
   const hasClientId = !!DRIVE.getClientId();
-  const skills = loadSkills(STATE.data || { skills: {} });
+  const appearance = (STATE.data && STATE.data.settings.appearance) || {};
   return `
     <div class="card">
       <h3 style="font-size:14px;">Google Drive connection</h3>
@@ -727,24 +735,6 @@ function renderSettings() {
       ${STATE.signedIn ? `<p class="small mt-8">✓ Connected. Your data is stored in your Drive as "emdr-companion-data.json".</p><button class="btn btn-ghost mt-8" id="btn-sign-out">Sign out</button>` : ""}
     </div>
 
-    ${STATE.data ? `
-    <div class="card">
-      <h3 style="font-size:14px;">Container name</h3>
-      <input type="text" id="container-name-input" value="${escapeHtml(STATE.data.containerName)}" />
-      <button class="btn btn-outline mt-8" id="btn-save-container-name">Save</button>
-    </div>
-
-    <div class="card">
-      <h3 style="font-size:14px;">Coping skill instructions</h3>
-      <p class="small">Edit these to match exactly what your therapist taught you.</p>
-      ${Object.entries(skills).map(([key, s]) => `
-        <label>${s.icon} ${escapeHtml(s.name)}</label>
-        <textarea data-skill-edit="${key}">${escapeHtml(s.instructions)}</textarea>
-      `).join("")}
-      <button class="btn btn-outline mt-8" id="btn-save-skills">Save skill instructions</button>
-    </div>
-    ` : ""}
-
     <div class="card small">
       <strong>About your data:</strong> Notes, safe place media, and logs are stored only in your Google Drive, in files this app creates. Nothing is kept permanently on this device. This app is a personal coping-skills organizer — it isn't a substitute for guidance from your EMDR therapist.
     </div>
@@ -753,13 +743,13 @@ function renderSettings() {
     <div class="card">
       <h3 style="font-size:14px;">Appearance</h3>
       <label>Background color</label>
-      <input type="color" id="appearance-bg" value="${STATE.data.settings.appearance?.bg || "#F2EDE4"}" />
+      <input type="color" id="appearance-bg" value="${appearance.bg || "#F2EDE4"}" />
       <label>Accent color</label>
-      <input type="color" id="appearance-accent" value="${STATE.data.settings.appearance?.accent || "#C97F4B"}" />
+      <input type="color" id="appearance-accent" value="${appearance.accent || "#C97F4B"}" />
       <label>Text color</label>
-      <input type="color" id="appearance-text" value="${STATE.data.settings.appearance?.text || "#26332B"}" />
+      <input type="color" id="appearance-text" value="${appearance.text || "#26332B"}" />
       <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-weight:600;">
-        <input type="checkbox" id="appearance-night" style="width:auto;" ${STATE.data.settings.appearance?.nightMode ? "checked" : ""} />
+        <input type="checkbox" id="appearance-night" style="width:auto;" ${appearance.nightMode ? "checked" : ""} />
         Night Mode
       </label>
       <p class="small mt-8">Night Mode uses a fixed dark palette (your accent color still applies) and overrides the background/text colors above while it's on.</p>
@@ -769,13 +759,122 @@ function renderSettings() {
   `;
 }
 
+function renderSettingsSkills() {
+  if (!STATE.data) return `<p class="small">Connect Google Drive first.</p>`;
+  const skills = loadSkills(STATE.data);
+  return `
+    <div class="card">
+      <h3 style="font-size:14px;">Coping skill instructions</h3>
+      <p class="small">Edit these to match exactly what your therapist taught you.</p>
+      ${Object.entries(skills).map(([key, s]) => `
+        <label>${s.icon} ${escapeHtml(s.name)}</label>
+        <textarea data-skill-edit="${key}">${escapeHtml(s.instructions)}</textarea>
+      `).join("")}
+      <button class="btn btn-outline mt-8" id="btn-save-skills">Save skill instructions</button>
+    </div>
+  `;
+}
+
+function renderSettingsContainer() {
+  if (!STATE.data) return `<p class="small">Connect Google Drive first.</p>`;
+  const data = STATE.data;
+  const topics = data.knownTopics || [];
+  return `
+    <div class="card">
+      <label>Container name</label>
+      <input type="text" id="container-name-input" value="${escapeHtml(data.containerName)}" />
+      <button class="btn btn-outline mt-8" id="btn-save-container-name">Save</button>
+
+      <label class="mt-16">Icon shown in the bottom menu</label>
+      <div class="chip-row" id="container-icon-picker">
+        ${Object.entries(CONTAINER_ICON_OPTIONS).map(([key, opt]) => `
+          <span class="chip ${key === (data.containerIcon || "jar") ? "selected" : ""}" data-icon-key="${key}">${opt.emoji} ${escapeHtml(opt.label)}</span>
+        `).join("")}
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="font-size:14px;">Known topics / traumas</h3>
+      <p class="small">Add the topics you track so they're quick to pick from when you add something to your ${escapeHtml(data.containerName)}.</p>
+      <div class="chip-row" id="topics-list">
+        ${topics.length === 0 ? `<span class="small">None added yet</span>` :
+          topics.map((t) => `<span class="chip">${escapeHtml(t)} <a href="#" data-del-topic="${escapeHtml(t)}">✕</a></span>`).join("")}
+      </div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <input type="text" id="new-topic-input" placeholder="e.g. Car accident" style="flex:1;" />
+        <button class="btn btn-outline" id="btn-add-topic" style="width:auto; padding:12px 16px;">Add</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderSettingsSafePlace() {
+  if (!STATE.data) return `<p class="small">Connect Google Drive first.</p>`;
+  const sp = STATE.data.safePlace;
+  return `
+    <div class="card">
+      <label>Name your safe place</label>
+      <input type="text" id="sp-name" value="${escapeHtml(sp.name)}" />
+      <button class="btn btn-outline mt-8" id="sp-save-name">Save name</button>
+      <p class="small mt-8">This name also shows on the bottom menu button in place of "Safe Place".</p>
+
+      <label class="mt-16">Icon shown in the bottom menu</label>
+      <div class="chip-row" id="sp-icon-picker">
+        ${Object.entries(SAFEPLACE_ICON_OPTIONS).map(([key, opt]) => `
+          <span class="chip ${key === (sp.icon || "trees") ? "selected" : ""}" data-icon-key="${key}">${opt.emoji} ${escapeHtml(opt.label)}</span>
+        `).join("")}
+      </div>
+    </div>
+
+    <div class="card">
+      <label>Describe your safe place</label>
+      <textarea id="sp-description" placeholder="What does it look, sound, and feel like here?">${escapeHtml(sp.description || "")}</textarea>
+      <button class="btn btn-outline mt-8" id="sp-save-description">Save description</button>
+    </div>
+
+    <div class="card">
+      <h3 style="font-size:14px;">Images</h3>
+      <div class="chip-row">
+        ${sp.images.map((img) => `<span class="chip">${escapeHtml(img.name)} <a href="#" data-del-img="${img.id}">✕</a></span>`).join("") || `<span class="small">None yet</span>`}
+      </div>
+      <button class="btn btn-outline mt-8" id="btn-add-image">+ Add image</button>
+      <input type="file" id="file-image" accept="image/*" multiple style="display:none;" />
+    </div>
+
+    <div class="card">
+      <h3 style="font-size:14px;">Sounds</h3>
+      <div class="chip-row">
+        ${sp.sounds.map((snd) => `<span class="chip">${escapeHtml(snd.name)} <a href="#" data-del-snd="${snd.id}">✕</a></span>`).join("") || `<span class="small">None yet</span>`}
+      </div>
+      <button class="btn btn-outline mt-8" id="btn-add-sound">+ Add sound</button>
+      <input type="file" id="file-sound" accept="audio/*" multiple style="display:none;" />
+    </div>
+  `;
+}
+
 function bindSettings() {
+  document.getElementById("settings-tabs").addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-settings-tab]");
+    if (!chip) return;
+    STATE.settingsTab = chip.dataset.settingsTab;
+    render();
+  });
+
+  const tab = STATE.settingsTab || "app";
+  if (tab === "app") bindSettingsApp();
+  if (tab === "skills") bindSettingsSkills();
+  if (tab === "container") bindSettingsContainer();
+  if (tab === "safeplace") bindSettingsSafePlace();
+}
+
+function bindSettingsApp() {
   document.getElementById("btn-save-client-id").addEventListener("click", () => {
     const id = document.getElementById("client-id-input").value.trim();
     if (!id) return;
     DRIVE.setClientId(id);
     render();
   });
+
   const connectBtn = document.getElementById("btn-connect-now");
   if (connectBtn) connectBtn.addEventListener("click", async () => {
     connectBtn.textContent = "Redirecting to Google…";
@@ -793,24 +892,6 @@ function bindSettings() {
     STATE.signedIn = false;
     STATE.data = null;
     render();
-  });
-
-  const nameBtn = document.getElementById("btn-save-container-name");
-  if (nameBtn) nameBtn.addEventListener("click", () => {
-    STATE.data.containerName = document.getElementById("container-name-input").value.trim() || "My Container";
-    persist();
-    render();
-  });
-
-  const skillsBtn = document.getElementById("btn-save-skills");
-  if (skillsBtn) skillsBtn.addEventListener("click", () => {
-    const overrides = {};
-    document.querySelectorAll("[data-skill-edit]").forEach((ta) => {
-      overrides[ta.dataset.skillEdit] = { instructions: ta.value.trim() };
-    });
-    STATE.data.skills = overrides;
-    persist();
-    alert("Saved.");
   });
 
   const bgInput = document.getElementById("appearance-bg");
@@ -840,6 +921,134 @@ function bindSettings() {
     applyAppearance();
     persist();
     render();
+  });
+}
+
+function bindSettingsSkills() {
+  const skillsBtn = document.getElementById("btn-save-skills");
+  if (skillsBtn) skillsBtn.addEventListener("click", () => {
+    const overrides = {};
+    document.querySelectorAll("[data-skill-edit]").forEach((ta) => {
+      overrides[ta.dataset.skillEdit] = { instructions: ta.value.trim() };
+    });
+    STATE.data.skills = overrides;
+    persist();
+    alert("Saved.");
+  });
+}
+
+function bindSettingsContainer() {
+  document.getElementById("btn-save-container-name").addEventListener("click", () => {
+    STATE.data.containerName = document.getElementById("container-name-input").value.trim() || "My Container";
+    persist();
+    render();
+  });
+
+  document.getElementById("container-icon-picker").addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-icon-key]");
+    if (!chip) return;
+    STATE.data.containerIcon = chip.dataset.iconKey;
+    persist();
+    render();
+  });
+
+  document.getElementById("btn-add-topic").addEventListener("click", () => {
+    const input = document.getElementById("new-topic-input");
+    const val = input.value.trim();
+    if (!val) return;
+    STATE.data.knownTopics = STATE.data.knownTopics || [];
+    const exists = STATE.data.knownTopics.some((t) => t.toLowerCase() === val.toLowerCase());
+    if (!exists) STATE.data.knownTopics.push(val);
+    input.value = "";
+    persist();
+    render();
+  });
+
+  document.querySelectorAll("[data-del-topic]").forEach((a) => {
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      const val = a.dataset.delTopic;
+      STATE.data.knownTopics = (STATE.data.knownTopics || []).filter((t) => t !== val);
+      persist();
+      render();
+    });
+  });
+}
+
+function bindSettingsSafePlace() {
+  document.getElementById("sp-save-name").addEventListener("click", () => {
+    STATE.data.safePlace.name = document.getElementById("sp-name").value.trim() || "Safe Place";
+    persist();
+    render();
+  });
+
+  document.getElementById("sp-icon-picker").addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-icon-key]");
+    if (!chip) return;
+    STATE.data.safePlace.icon = chip.dataset.iconKey;
+    persist();
+    render();
+  });
+
+  document.getElementById("sp-save-description").addEventListener("click", () => {
+    STATE.data.safePlace.description = document.getElementById("sp-description").value.trim();
+    persist();
+    render();
+  });
+
+  const imgBtn = document.getElementById("btn-add-image");
+  const imgInput = document.getElementById("file-image");
+  imgBtn.addEventListener("click", () => imgInput.click());
+  imgInput.addEventListener("change", async () => {
+    for (const file of imgInput.files) {
+      imgBtn.textContent = "Uploading…";
+      try {
+        const uploaded = await DRIVE.uploadMedia(file);
+        STATE.data.safePlace.images.push(uploaded);
+      } catch (e) { alert(e.message); }
+    }
+    imgBtn.textContent = "+ Add image";
+    persist();
+    render();
+  });
+
+  const sndBtn = document.getElementById("btn-add-sound");
+  const sndInput = document.getElementById("file-sound");
+  sndBtn.addEventListener("click", () => sndInput.click());
+  sndInput.addEventListener("change", async () => {
+    for (const file of sndInput.files) {
+      sndBtn.textContent = "Uploading…";
+      try {
+        const uploaded = await DRIVE.uploadMedia(file);
+        STATE.data.safePlace.sounds.push(uploaded);
+      } catch (e) { alert(e.message); }
+    }
+    sndBtn.textContent = "+ Add sound";
+    persist();
+    render();
+  });
+
+  document.querySelectorAll("[data-del-img]").forEach((a) => {
+    a.addEventListener("click", async (e) => {
+      e.preventDefault();
+      const id = a.dataset.delImg;
+      STATE.data.safePlace.images = STATE.data.safePlace.images.filter((i) => i.id !== id);
+      if (STATE.data.safePlace.selectedImageId === id) STATE.data.safePlace.selectedImageId = null;
+      persist();
+      render();
+      DRIVE.deleteMedia(id).catch(() => {});
+    });
+  });
+  document.querySelectorAll("[data-del-snd]").forEach((a) => {
+    a.addEventListener("click", async (e) => {
+      e.preventDefault();
+      const id = a.dataset.delSnd;
+      STATE.data.safePlace.sounds = STATE.data.safePlace.sounds.filter((i) => i.id !== id);
+      if (STATE.data.safePlace.selectedSoundId === id) STATE.data.safePlace.selectedSoundId = null;
+      persist();
+      render();
+      DRIVE.deleteMedia(id).catch(() => {});
+    });
   });
 }
 

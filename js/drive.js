@@ -119,8 +119,17 @@ const DRIVE = (() => {
       containerIcon: "jar",
       createdAt: new Date().toISOString(),
       notes: [],
+      knownTopics: [],
       skillUsageLog: [],
-      safePlace: { name: "Safe Place", icon: "trees", images: [], sounds: [] },
+      safePlace: {
+        name: "Safe Place",
+        icon: "trees",
+        description: "",
+        images: [],
+        sounds: [],
+        selectedImageId: null,
+        selectedSoundId: null,
+      },
       settings: {
         weeklySummaryDay: "Sunday",
         lastSummaryShown: null,
