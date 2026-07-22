@@ -15,6 +15,24 @@ const SYMPTOM_OPTIONS = [
   "Low mood", "Sleep disturbance",
 ];
 
+const CONTAINER_ICON_OPTIONS = {
+  jar: { emoji: "🏺", label: "Jar" },
+  trash: { emoji: "🗑️", label: "Trash can" },
+  bucket: { emoji: "🪣", label: "Bucket" },
+  crate: { emoji: "🧺", label: "Wooden crate" },
+  box: { emoji: "📦", label: "Cardboard box" },
+  bowl: { emoji: "🥣", label: "Bowl" },
+};
+
+const SAFEPLACE_ICON_OPTIONS = {
+  trees: { emoji: "🌲", label: "Trees" },
+  campfire: { emoji: "🌲🔥", label: "Pines & campfire" },
+  lake: { emoji: "🏞️", label: "Lake in the mountains" },
+  beach: { emoji: "🏖️", label: "Beach at sunset" },
+  stars: { emoji: "🌌", label: "Starry night sky" },
+  livingroom: { emoji: "🛋️", label: "Cozy living room" },
+};
+
 function uuid() {
   return (crypto.randomUUID && crypto.randomUUID()) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -63,6 +81,44 @@ function renderSyncIndicator() {
     STATE.syncStatus === "error" ? "⚠ not saved" : "";
 }
 
+// --- Appearance (colors + night mode) -----------------------------------------
+function applyAppearance() {
+  const appearance = (STATE.data && STATE.data.settings && STATE.data.settings.appearance) || {};
+  const night = !!appearance.nightMode;
+  const root = document.documentElement.style;
+
+  const bg = night ? "#1C2420" : (appearance.bg || "#F2EDE4");
+  const text = night ? "#E9EFE9" : (appearance.text || "#26332B");
+  const accent = appearance.accent || "#C97F4B";
+  const card = night ? "#26332C" : "#FBF9F4";
+  const mist = night ? "#3C4A42" : "#C7D3C3";
+  const heading = night ? "#BFE3C9" : "#2C4A34";
+
+  root.setProperty("--bg", bg);
+  root.setProperty("--ink", text);
+  root.setProperty("--amber", accent);
+  root.setProperty("--bg-card", card);
+  root.setProperty("--mist", mist);
+  root.setProperty("--moss-dark", heading);
+}
+
+// --- Keep the bottom nav's icons/labels in sync with user choices ------------
+function updateNavBar() {
+  const data = STATE.data;
+  const containerKey = (data && data.containerIcon) || "jar";
+  const safeKey = (data && data.safePlace && data.safePlace.icon) || "trees";
+  const containerIcon = (CONTAINER_ICON_OPTIONS[containerKey] || CONTAINER_ICON_OPTIONS.jar).emoji;
+  const safeIcon = (SAFEPLACE_ICON_OPTIONS[safeKey] || SAFEPLACE_ICON_OPTIONS.trees).emoji;
+  const safeLabel = (data && data.safePlace && data.safePlace.name) || "Safe Place";
+
+  const navIconHome = document.getElementById("nav-icon-home");
+  if (navIconHome) navIconHome.textContent = containerIcon;
+  const navIconSafe = document.getElementById("nav-icon-safeplace");
+  if (navIconSafe) navIconSafe.textContent = safeIcon;
+  const navLabelSafe = document.getElementById("nav-label-safeplace");
+  if (navLabelSafe) navLabelSafe.textContent = safeLabel;
+}
+
 // --- Router -------------------------------------------------------------------
 function setView(view) {
   STATE.view = view;
@@ -83,6 +139,8 @@ document.getElementById("tabs").addEventListener("click", (e) => {
 });
 
 function render() {
+  applyAppearance();
+  updateNavBar();
   const root = document.getElementById("view-root");
   if (STATE.view === "settings") {
     root.innerHTML = renderSettings();
@@ -153,6 +211,19 @@ function renderHome() {
     .slice(0, 3);
 
   return `
+    <div class="card">
+      <label>Container name</label>
+      <input type="text" id="home-container-name" value="${escapeHtml(data.containerName)}" />
+      <button class="btn btn-outline mt-8" id="home-save-name">Save name</button>
+
+      <label class="mt-16">Icon shown in the bottom menu</label>
+      <div class="chip-row" id="home-icon-picker">
+        ${Object.entries(CONTAINER_ICON_OPTIONS).map(([key, opt]) => `
+          <span class="chip ${key === (data.containerIcon || "jar") ? "selected" : ""}" data-icon-key="${key}">${opt.emoji} ${escapeHtml(opt.label)}</span>
+        `).join("")}
+      </div>
+    </div>
+
     <div class="jar-wrap">
       ${jarSvg(fillLevel)}
       <div class="jar-caption">${escapeHtml(data.containerName)}</div>
@@ -256,6 +327,20 @@ function renderNoteForm() {
 }
 
 function bindHome() {
+  document.getElementById("home-save-name").addEventListener("click", () => {
+    STATE.data.containerName = document.getElementById("home-container-name").value.trim() || "My Container";
+    persist();
+    render();
+  });
+
+  document.getElementById("home-icon-picker").addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-icon-key]");
+    if (!chip) return;
+    STATE.data.containerIcon = chip.dataset.iconKey;
+    persist();
+    render();
+  });
+
   document.getElementById("btn-add-note").addEventListener("click", () => {
     STATE.showNoteForm = !STATE.showNoteForm;
     render();
@@ -459,6 +544,14 @@ function renderSafePlace() {
       <label>Name your safe place</label>
       <input type="text" id="sp-name" value="${escapeHtml(sp.name)}" />
       <button class="btn btn-outline mt-8" id="sp-save-name">Save name</button>
+      <p class="small mt-8">This name also shows on the bottom menu button in place of "Safe Place".</p>
+
+      <label class="mt-16">Icon shown in the bottom menu</label>
+      <div class="chip-row" id="sp-icon-picker">
+        ${Object.entries(SAFEPLACE_ICON_OPTIONS).map(([key, opt]) => `
+          <span class="chip ${key === (sp.icon || "trees") ? "selected" : ""}" data-icon-key="${key}">${opt.emoji} ${escapeHtml(opt.label)}</span>
+        `).join("")}
+      </div>
     </div>
 
     <div class="card">
@@ -490,6 +583,14 @@ function bindSafePlace() {
 
   document.getElementById("sp-save-name").addEventListener("click", () => {
     STATE.data.safePlace.name = document.getElementById("sp-name").value.trim() || "Safe Place";
+    persist();
+    render();
+  });
+
+  document.getElementById("sp-icon-picker").addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-icon-key]");
+    if (!chip) return;
+    STATE.data.safePlace.icon = chip.dataset.iconKey;
     persist();
     render();
   });
@@ -647,6 +748,24 @@ function renderSettings() {
     <div class="card small">
       <strong>About your data:</strong> Notes, safe place media, and logs are stored only in your Google Drive, in files this app creates. Nothing is kept permanently on this device. This app is a personal coping-skills organizer — it isn't a substitute for guidance from your EMDR therapist.
     </div>
+
+    ${STATE.data ? `
+    <div class="card">
+      <h3 style="font-size:14px;">Appearance</h3>
+      <label>Background color</label>
+      <input type="color" id="appearance-bg" value="${STATE.data.settings.appearance?.bg || "#F2EDE4"}" />
+      <label>Accent color</label>
+      <input type="color" id="appearance-accent" value="${STATE.data.settings.appearance?.accent || "#C97F4B"}" />
+      <label>Text color</label>
+      <input type="color" id="appearance-text" value="${STATE.data.settings.appearance?.text || "#26332B"}" />
+      <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-weight:600;">
+        <input type="checkbox" id="appearance-night" style="width:auto;" ${STATE.data.settings.appearance?.nightMode ? "checked" : ""} />
+        Night Mode
+      </label>
+      <p class="small mt-8">Night Mode uses a fixed dark palette (your accent color still applies) and overrides the background/text colors above while it's on.</p>
+      <button class="btn btn-ghost mt-8" id="btn-reset-appearance">Reset to defaults</button>
+    </div>
+    ` : ""}
   `;
 }
 
@@ -692,6 +811,35 @@ function bindSettings() {
     STATE.data.skills = overrides;
     persist();
     alert("Saved.");
+  });
+
+  const bgInput = document.getElementById("appearance-bg");
+  const accentInput = document.getElementById("appearance-accent");
+  const textInput = document.getElementById("appearance-text");
+  const nightInput = document.getElementById("appearance-night");
+  if (bgInput) {
+    const saveAppearance = () => {
+      STATE.data.settings.appearance = {
+        bg: bgInput.value,
+        accent: accentInput.value,
+        text: textInput.value,
+        nightMode: nightInput.checked,
+      };
+      applyAppearance();
+      persist();
+    };
+    bgInput.addEventListener("input", saveAppearance);
+    accentInput.addEventListener("input", saveAppearance);
+    textInput.addEventListener("input", saveAppearance);
+    nightInput.addEventListener("change", saveAppearance);
+  }
+
+  const resetAppearanceBtn = document.getElementById("btn-reset-appearance");
+  if (resetAppearanceBtn) resetAppearanceBtn.addEventListener("click", () => {
+    STATE.data.settings.appearance = { bg: "#F2EDE4", accent: "#C97F4B", text: "#26332B", nightMode: false };
+    applyAppearance();
+    persist();
+    render();
   });
 }
 

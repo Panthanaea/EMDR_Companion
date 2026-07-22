@@ -143,6 +143,16 @@ input[type=text], input[type=number], textarea, select {
 }
 textarea { min-height: 90px; resize: vertical; }
 
+input[type=color] {
+  width: 56px;
+  height: 36px;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--mist);
+  background: #fff;
+  cursor: pointer;
+}
+
 /* Chips */
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .chip {

@@ -116,11 +116,16 @@ const DRIVE = (() => {
     return {
       version: 1,
       containerName: containerName || "My Container",
+      containerIcon: "jar",
       createdAt: new Date().toISOString(),
       notes: [],
       skillUsageLog: [],
-      safePlace: { name: "Safe Place", images: [], sounds: [] },
-      settings: { weeklySummaryDay: "Sunday", lastSummaryShown: null },
+      safePlace: { name: "Safe Place", icon: "trees", images: [], sounds: [] },
+      settings: {
+        weeklySummaryDay: "Sunday",
+        lastSummaryShown: null,
+        appearance: { bg: "#F2EDE4", accent: "#C97F4B", text: "#26332B", nightMode: false },
+      },
       skills: {},
     };
   }
