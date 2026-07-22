@@ -11,9 +11,19 @@ const DRIVE = (() => {
 
   let clientId = null;
   let tokenClient = null;
-  let accessToken = null;
-  let tokenExpiresAt = 0;
+  let accessToken = localStorage.getItem("emdr_access_token") || null;
+  let tokenExpiresAt = Number(localStorage.getItem("emdr_token_expires_at") || 0);
   let dataFileId = null;
+
+  function persistToken() {
+    if (accessToken) {
+      localStorage.setItem("emdr_access_token", accessToken);
+      localStorage.setItem("emdr_token_expires_at", String(tokenExpiresAt));
+    } else {
+      localStorage.removeItem("emdr_access_token");
+      localStorage.removeItem("emdr_token_expires_at");
+    }
+  }
 
   function setClientId(id) {
     clientId = id;
@@ -60,10 +70,17 @@ const DRIVE = (() => {
         if (resp.error) return reject(new Error(resp.error));
         accessToken = resp.access_token;
         tokenExpiresAt = Date.now() + (resp.expires_in - 60) * 1000;
+        persistToken();
         resolve(accessToken);
       };
       client.requestAccessToken({ prompt: silentFirst ? "" : "consent" });
     });
+  }
+
+  function signOut() {
+    accessToken = null;
+    tokenExpiresAt = 0;
+    persistToken();
   }
 
   async function ensureToken() {
@@ -206,6 +223,7 @@ const DRIVE = (() => {
     getClientId,
     isSignedIn,
     signIn,
+    signOut,
     loadData,
     saveData,
     uploadMedia,

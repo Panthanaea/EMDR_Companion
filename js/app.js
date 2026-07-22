@@ -623,7 +623,7 @@ function renderSettings() {
       <input type="text" id="client-id-input" value="${escapeHtml(DRIVE.getClientId() || "")}" placeholder="xxxx.apps.googleusercontent.com" />
       <button class="btn btn-outline mt-8" id="btn-save-client-id">Save Client ID</button>
       ${hasClientId && !STATE.signedIn ? `<button class="btn btn-primary mt-8" id="btn-connect-now">Connect Google Drive</button>` : ""}
-      ${STATE.signedIn ? `<p class="small mt-8">✓ Connected. Your data is stored in your Drive as "emdr-companion-data.json".</p>` : ""}
+      ${STATE.signedIn ? `<p class="small mt-8">✓ Connected. Your data is stored in your Drive as "emdr-companion-data.json".</p><button class="btn btn-ghost mt-8" id="btn-sign-out">Sign out</button>` : ""}
     </div>
 
     ${STATE.data ? `
@@ -670,6 +670,14 @@ function bindSettings() {
       alert(e.message || "Could not connect.");
       connectBtn.textContent = "Connect Google Drive";
     }
+  });
+
+  const signOutBtn = document.getElementById("btn-sign-out");
+  if (signOutBtn) signOutBtn.addEventListener("click", () => {
+    DRIVE.signOut();
+    STATE.signedIn = false;
+    STATE.data = null;
+    render();
   });
 
   const nameBtn = document.getElementById("btn-save-container-name");
@@ -720,7 +728,9 @@ async function boot() {
   const clientId = DRIVE.getClientId();
   if (clientId) {
     try {
-      await DRIVE.signIn({ silentFirst: true });
+      if (!DRIVE.isSignedIn()) {
+        await DRIVE.signIn({ silentFirst: true });
+      }
       STATE.data = await DRIVE.loadData();
       STATE.signedIn = true;
       maybeShowWeeklyBanner();

@@ -1,4 +1,4 @@
-const CACHE_NAME = "emdr-companion-shell-v1";
+const CACHE_NAME = "emdr-companion-shell-v2";
 const SHELL_FILES = [
   "./",
   "./index.html",
@@ -27,8 +27,11 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-// Only cache-first the app shell itself. Never intercept Google API / Drive
-// requests, so notes and media always come fresh from the network.
+// Network-first for the app shell: always try to get the latest code first,
+// and only fall back to the cached copy if the network request fails (i.e.
+// offline). This means updates you deploy actually reach the phone, and the
+// cache exists purely for offline use, not as the default source of truth.
+// Google API / Drive requests are never intercepted.
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   const isShellRequest = url.origin === self.location.origin;
@@ -36,15 +39,12 @@ self.addEventListener("fetch", (event) => {
   if (!isShellRequest) return; // let Drive/Google requests pass straight through
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return (
-        cached ||
-        fetch(event.request).then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          return response;
-        }).catch(() => cached)
-      );
-    })
+    fetch(event.request)
+      .then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
